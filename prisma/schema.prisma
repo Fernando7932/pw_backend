@@ -1,0 +1,124 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// ==========================================
+// 1. CONFIGURACIÓN DE INFRAESTRUCTURA
+// ==========================================
+
+// Definición del proveedor de base de datos (PostgreSQL)
+datasource db {
+  provider = "postgresql"
+  // La URL de conexión se lee de las variables de entorno para seguridad
+  // Formato: "postgresql://USER:PASSWORD@HOST:PORT/DB_NAME"
+  url      = env("DATABASE_URL")
+}
+
+// Generador del cliente: Crea los tipos de TypeScript basados en este esquema
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// 2. NÚCLEO DE USUARIOS Y CANALES
+// ==========================================
+
+// Modelo Central de Usuario
+// Representa tanto a Espectadores como a Streamers (un usuario puede ser ambos).
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  // --- Economía Global ---
+  coins Int @default(0) // Saldo "monedero" del usuario, utilizable en cualquier canal
+
+  // --- Métricas de Streamer ---
+  // Estos campos solo son relevantes si el usuario decide transmitir
+  streamHours   Float  @default(0) // Acumulado histórico de horas transmitidas
+  streamerLevel Int    @default(1) // Nivel del propio streamer (basado en sus horas)
+
+  // --- Relaciones Directas ---
+  stream Stream? // Relación 1:1 (Un usuario tiene un único canal de transmisión)
+  gifts  Gift[]  // Catálogo de regalos creado por este usuario (como streamer)
+
+  // --- Configuración ---
+  levelConfigs SpectatorLevelConfig[] // Reglas de nivel definidas por este streamer
+
+  // --- Sistema de Lealtad (Relaciones N:M explícitas) ---
+  // 1. loyaltyGiven: Registros de lealtad donde este usuario es el ESPECTADOR
+  loyaltyGiven     Loyalty[] @relation("SpectatorLoyalty") 
+  // 2. loyaltyReceived: Registros de lealtad donde este usuario es el STREAMER
+  loyaltyReceived  Loyalty[] @relation("StreamerLoyalty")  
+}
+
+// Modelo de Transmisión (Canal)
+// Contiene la configuración técnica y el estado del directo.
+model Stream {
+  id      String  @id @default(uuid())
+  title   String  @default("Mi stream")
+  isLive  Boolean @default(false)
+  
+  // Marca de tiempo para calcular duración de sesión (inicio - fin)
+  streamStartTime DateTime?
+  
+  // Credencial crítica para OBS/SRS. Debe mantenerse secreta.
+  streamKey String @unique
+  
+  // Vinculación con el usuario dueño del canal
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @unique 
+}
+
+// ==========================================
+// 3. ECONOMÍA Y GAMIFICACIÓN
+// ==========================================
+
+// Modelo de Regalos
+// Ítems virtuales que los espectadores compran para apoyar al streamer.
+model Gift {
+  id     String @id @default(uuid())
+  name   String
+  cost   Int // Precio en monedas (se descuenta al espectador)
+  points Int // Experiencia otorgada (se suma a la lealtad del espectador)
+
+  // El regalo pertenece a un streamer específico (Economía personalizada)
+  streamer   User   @relation(fields: [streamerId], references: [id])
+  streamerId String
+}
+
+// Modelo de Lealtad (Tabla Intermedia / Pivot)
+// Almacena el progreso de un espectador específico en un canal específico.
+model Loyalty {
+  id      String @id @default(uuid())
+  points  Int    @default(0) // Puntos acumulados en ESTE canal
+  level   Int    @default(1) // Nivel alcanzado en ESTE canal
+
+  // Quién está viendo (Espectador)
+  spectator   User   @relation("SpectatorLoyalty", fields: [spectatorId], references: [id])
+  spectatorId String
+
+  // A quién está viendo (Streamer)
+  streamer    User   @relation("StreamerLoyalty", fields: [streamerId], references: [id])
+  streamerId  String
+  
+  // Restricción única: Un espectador no puede tener dos registros de lealtad para el mismo streamer.
+  @@unique([spectatorId, streamerId])
+}
+
+
+// Modelo de Configuración de Niveles
+// Permite que cada streamer defina sus propias reglas de dificultad para subir de nivel.
+model SpectatorLevelConfig {
+  id             String @id @default(uuid())
+  level          Int    
+  pointsRequired Int // Umbral de puntos necesarios para alcanzar este nivel
+
+  // Relación con el streamer que define la regla
+  streamer   User   @relation(fields: [streamerId], references: [id])
+  streamerId String
+  
+  // Restricción única: Un streamer no puede definir dos reglas distintas para el mismo nivel (ej: Nivel 2).
+  @@unique([level, streamerId]) 
+}
