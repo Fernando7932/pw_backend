@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import { randomBytes } from 'crypto';
 import { authMiddleware, AuthRequest } from './middleware/auth.middleware';
 
+// --- NUEVAS IMPORTACIONES PARA SOCKET.IO ---
 import { createServer } from 'http'; // (De Node)
 import { Server } from 'socket.io'; // (De 'socket.io')
 
@@ -19,7 +20,6 @@ const httpServer = createServer(app);
 // --- INICIALIZA SOCKET.IO ---
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173", // Permite la conexión con tu frontend
     origin: "*",
     methods: ["GET", "POST"]
   }
@@ -41,7 +41,8 @@ app.use(express.json()); // Permite parsear JSON del body
 // ---      LÓGICA DE SUBIR DE NIVEL      ---
 // --- ================================== ---
 
-
+// --- ¡NUEVA FUNCIÓN! ---
+// (RF-11, RF-13)
 // Revisa si el usuario debe subir de nivel
 const checkAndApplyLevelUp = async (
   // (Cambiamos 'tx' para que acepte el tipo de cliente de Prisma)
@@ -74,7 +75,9 @@ const checkAndApplyLevelUp = async (
       where: { id: currentLoyaltyId },
       data: { level: newLevel }
     });
-
+    
+    // (RF-13: La notificación se emitirá desde la función que llama a esta)
+    
     return newLevel;
 
   } catch (error) {
@@ -113,7 +116,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
         passwordHash: passwordHash,
       },
     });
-
+    
     await prisma.stream.create({
         data: {
             userId: newUser.id,
@@ -139,7 +142,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 app.post('/api/auth/login', async (req: Request, res: Response) => {
     try {
         const { email, password } = req.body;
-
+        
         if (!email || !password) {
             return res.status(400).json({ message: 'Email y contraseña son requeridos.' });
         }
@@ -149,7 +152,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         if (!user) {
             return res.status(404).json({ message: 'Usuario no encontrado' });
         }
-
+        
         const isMatch = await bcrypt.compare(password, user.passwordHash);
         if (!isMatch) {
              return res.status(400).json({ message: 'Contraseña incorrecta' });
@@ -199,7 +202,7 @@ app.get('/api/stream/me', authMiddleware, async (req: AuthRequest, res: Response
     if (!stream) {
       return res.status(404).json({ message: 'Información de stream no encontrada para este usuario.' });
     }
-
+    
     // (RF-17) Incluimos las horas de stream
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -241,7 +244,7 @@ app.get('/api/streams/live', async (req: Request, res: Response) => {
 app.get('/api/stream/u/:username', async (req: Request, res: Response) => {
   try {
     const { username } = req.params;
-
+    
     const stream = await prisma.stream.findFirst({
       where: {
         user: {
@@ -291,11 +294,11 @@ app.post('/api/webhooks/on_publish', async (req: Request, res: Response) => {
         streamStartTime: new Date(), 
       },
     });
-
+    
     console.log(`[WEBHOOK] Stream iniciado: ${stream.userId}`);
-
+    
     io.emit('streams_changed');
-
+    
     res.status(200).json({ error: 0, code: 0 }); 
 
   } catch (error: any) {
@@ -342,7 +345,7 @@ app.post('/api/webhooks/on_publish_done', async (req: Request, res: Response) =>
     });
 
     console.log(`[WEBHOOK] Stream terminado: ${updatedUser.username}. Duración: ${durationInHours.toFixed(2)} horas.`);
-
+    
     io.emit('streams_changed');
 
     res.status(200).json({ error: 0, code: 0 }); 
@@ -376,6 +379,7 @@ app.get('/api/user/coins', authMiddleware, async (req: AuthRequest, res: Respons
   }
 });
 
+// (RF-08, RF-11) Obtener los puntos/nivel de un usuario PARA UN CANAL
 app.get('/api/user/loyalty/:streamerUsername', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { streamerUsername } = req.params;
   const spectatorId = req.user?.userId;
